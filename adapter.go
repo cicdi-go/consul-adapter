@@ -7,29 +7,68 @@ import (
 
 	"github.com/casbin/casbin/model"
 	"github.com/hashicorp/consul/api"
-	"github.com/inconshreveable/log15"
+	"github.com/micro/go-config/source"
+	"net"
+	"fmt"
 )
 
-// KVAdapter represents the consul adapter for policy persistence, can load policy from consul or save policy to consul.
-type KVAdapter struct {
-	kv *api.KV
+var (
+	DefaultPrefix = "/micro/config/"
+)
+
+type Adapter struct {
+	prefix      string
+	stripPrefix string
+	addr        string
+	opts        source.Options
+	client      *api.Client
 }
 
-// NewKVAdapter is the constructor for KVAdapter.
-func NewKVAdapter(httpport string) (*KVAdapter, error) {
-	config := api.DefaultConfig()
-	config.Address = httpport
-	client, err := api.NewClient(config)
+// NewDBAdapter is the constructor for Adapter.
+func NewAdapter(opts ...source.Option) *Adapter {
+	return newAdapter(opts...)
+}
 
-	if err != nil {
-		log15.Error("Could not initialize client", "Error", err)
-		return nil, err
+func newAdapter(opts ...source.Option) *Adapter {
+	options := source.NewOptions(opts...)
+
+	// use default config
+	config := api.DefaultConfig()
+
+	// check if there are any addrs
+	a, ok := options.Context.Value(addressKey{}).(string)
+	if ok {
+		addr, port, err := net.SplitHostPort(a)
+		if ae, ok := err.(*net.AddrError); ok && ae.Err == "missing port in address" {
+			port = "8500"
+			addr = a
+			config.Address = fmt.Sprintf("%s:%s", addr, port)
+		} else if err == nil {
+			config.Address = fmt.Sprintf("%s:%s", addr, port)
+		}
 	}
 
-	// Get a handle to the KV API
-	kv := client.KV()
-	a := KVAdapter{kv}
-	return &a, err
+	// create the client
+	client, _ := api.NewClient(config)
+
+	prefix := DefaultPrefix
+	sp := ""
+	f, ok := options.Context.Value(prefixKey{}).(string)
+	if ok {
+		prefix = f
+	}
+
+	if b, ok := options.Context.Value(stripPrefixKey{}).(bool); ok && b {
+		sp = prefix
+	}
+
+	return &Adapter{
+		prefix:      prefix,
+		stripPrefix: sp,
+		addr:        config.Address,
+		opts:        options,
+		client:      client,
+	}
 }
 
 func loadPolicyKey(line string, model model.Model) {
@@ -45,10 +84,10 @@ func loadPolicyKey(line string, model model.Model) {
 }
 
 // LoadPolicy loads policy from consul.
-func (a *KVAdapter) LoadPolicy(model model.Model) error {
+func (a *Adapter) LoadPolicy(model model.Model) error {
 	line := [][]string{}
 
-	pair, _, err := a.kv.Get("rp", nil)
+	pair, _, err := a.client.KV().Get("rp", nil)
 	if err != nil {
 		return err
 	}
@@ -72,8 +111,8 @@ func (a *KVAdapter) LoadPolicy(model model.Model) error {
 	return nil
 }
 
-func (a *KVAdapter) writePolicyKey(rule [][]string) error {
-	pair, _, err := a.kv.Get("rp", nil)
+func (a *Adapter) writePolicyKey(rule [][]string) error {
+	pair, _, err := a.client.KV().Get("rp", nil)
 	if err != nil {
 		return err
 	}
@@ -87,7 +126,7 @@ func (a *KVAdapter) writePolicyKey(rule [][]string) error {
 		p.ModifyIndex = pair.ModifyIndex
 	}
 
-	if success, _, err := a.kv.CAS(p, nil); success {
+	if success, _, err := a.client.KV().CAS(p, nil); success {
 		if err != nil {
 			return err
 		}
@@ -99,7 +138,7 @@ func (a *KVAdapter) writePolicyKey(rule [][]string) error {
 }
 
 // SavePolicy saves policy to consul.
-func (a *KVAdapter) SavePolicy(model model.Model) error {
+func (a *Adapter) SavePolicy(model model.Model) error {
 
 	var rule [][]string
 	if len(model["p"]["p"].Policy) != 0 {
@@ -116,4 +155,19 @@ func (a *KVAdapter) SavePolicy(model model.Model) error {
 	}
 
 	return nil
+}
+
+// AddPolicy adds a policy rule to the storage.
+func (a *Adapter) AddPolicy(sec string, ptype string, rule []string) error {
+	return errors.New("not implemented")
+}
+
+// RemovePolicy removes a policy rule from the storage.
+func (a *Adapter) RemovePolicy(sec string, ptype string, rule []string) error {
+	return errors.New("not implemented")
+}
+
+// RemoveFilteredPolicy removes policy rules that match the filter from the storage.
+func (a *Adapter) RemoveFilteredPolicy(sec string, ptype string, fieldIndex int, fieldValues ...string) error {
+	return errors.New("not implemented")
 }
