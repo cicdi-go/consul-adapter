@@ -7,14 +7,14 @@ package main
 
 import (
 	"github.com/casbin/casbin"
-	"github.com/ankitm123/consul-adapter"
+	"github.com/cicdi-go/consul-adapter"
 )
 
 func main() {
 	//This is how it should ideally work:
     // Initialize a consul adapter and use it in a Casbin enforcer:
     
-	a := consuladapter.NewDBAdapter()
+	a := consuladapter.NewAdapter()
 	e := casbin.NewEnforcer("examples/rbac_model.conf", a)
 	
 	// Load the policy from consul KV store.
